@@ -28,4 +28,33 @@ describe("API boundary", () => {
 
     await expect(api.search({ query: "", topK: 20, videoId: null })).rejects.toEqual(new ApiError("bad query", 422));
   });
+
+  it("normalizes a generated Q&A answer and its evidence frame", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      videoId: "L30_V001",
+      frameId: 125,
+      answer: "Năm",
+      confidence: 0.92,
+      reasoning: "Có năm người trên sân khấu.",
+      contextFrameIds: [75, 100, 125, 150, 175],
+      evidenceFrame: {
+        rank: 1,
+        videoId: "L30_V001",
+        frameId: 125,
+        timestamp: 5,
+        thumbnailUrl: "/frame.jpg",
+      },
+    }), { status: 200 })));
+
+    const response = await api.answerQuestion({
+      eventDescription: "Lễ trao giải",
+      question: "Có bao nhiêu người?",
+      videoId: "L30_V001",
+      frameId: 100,
+    });
+
+    expect(response.answer).toBe("Năm");
+    expect(response.evidenceFrame.frameId).toBe(125);
+    expect(response.contextFrameIds).toHaveLength(5);
+  });
 });

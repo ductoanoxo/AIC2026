@@ -14,8 +14,8 @@ Project tập trung vào thao tác nhanh:
 Frontend chỉ giao tiếp với backend qua API. Browser không đọc dataset, `.npy`,
 FAISS index, CLIP model, object-detection file hoặc thực hiện vector search.
 
-> Backend hiện chưa được implement. Thư mục `backend/` chỉ chứa API contract và
-> hướng dẫn tích hợp.
+Backend FastAPI hiện hỗ trợ CLIP/FAISS retrieval cho KIS và Gemini 3 Flash qua
+OpenRouter cho Q&A trên cụm frame lân cận.
 
 ## 1. Kiến trúc project
 
@@ -122,16 +122,18 @@ Có thể lưu tối đa 100 candidate tạm thời.
 
 ### Q&A — Video Question Answering
 
-1. Search như KIS.
-2. Chọn frame.
-3. Nhập câu trả lời bằng Vietnamese hoặc English.
-4. Tạo submission:
+1. Nhập riêng mô tả sự kiện và câu hỏi.
+2. Search mô tả sự kiện như KIS rồi chọn frame.
+3. Chọn `Generate answer` để Gemini 3 Flash qua OpenRouter phân tích năm frame lân cận.
+4. Kiểm tra hoặc sửa câu trả lời bằng Vietnamese hoặc English.
+5. Tạo submission:
 
 ```text
 <videoId>,<frameId>,<answer>
 ```
 
-Answer luôn do user chỉnh sửa thủ công; frontend không tự thực hiện VQA.
+Answer do backend gợi ý nhưng luôn cho phép user chỉnh sửa thủ công. Thao tác
+`Generate answer` gửi các frame ngữ cảnh tới OpenRouter API đã cấu hình.
 
 ### TRAKE — Temporal Retrieval and Alignment of Key Events
 
@@ -170,10 +172,7 @@ Request:
 {
   "query": "natural language query",
   "topK": 50,
-  "videoId": null,
-  "filters": {
-    "objects": []
-  }
+  "videoId": null
 }
 ```
 
@@ -274,15 +273,17 @@ Test hiện tại cover:
 - giới hạn 100 candidates;
 - API network/HTTP error;
 - request cancellation;
+- Q&A API response normalization;
 - selected result trong result grid.
 
 Kết quả xác nhận hiện tại:
 
 ```text
 3 test files passed
-10 tests passed
+11 tests passed
 npm run lint passed
 npm run build passed
+backend: 9 tests passed
 ```
 
 ## 9. Design direction
@@ -301,11 +302,12 @@ UI được thiết kế theo hướng Hallmark Workbench/Cobalt:
 
 ## 10. Giới hạn hiện tại
 
-- Chưa có backend implementation.
 - Chưa có authentication/authorization.
 - Chưa có upload dataset hoặc quản lý competition batch.
-- Chưa có automatic VQA.
-- Object filter hiện nhận label do user nhập; chưa có endpoint label catalog.
+- Q&A hiện dựa trên frame hình ảnh; OCR/STT offline chưa được hợp nhất vào bước
+  trả lời tự động.
+- Không có object filter. `task.txt` xếp Objects vào dữ liệu hỗ trợ, không phải
+  yêu cầu chấm điểm, nên UI chỉ giữ những gì ảnh hưởng trực tiếp tới R-Score.
 - Không có browser-level E2E test; hiện có unit/component tests và Vite smoke test.
 
 ## 11. Codebase MCP

@@ -1,6 +1,8 @@
 import type {
   ApiStatus,
   ObjectDetection,
+  QaAnswerRequest,
+  QaAnswerResponse,
   SearchRequest,
   SearchResponse,
   SearchResult,
@@ -125,6 +127,31 @@ function normalizeResponse(value: unknown, fallbackQuery: string): SearchRespons
   };
 }
 
+function normalizeQaResponse(value: unknown): QaAnswerResponse {
+  if (!isRecord(value)) {
+    throw new ApiError("The Q&A API returned an invalid response.", 502);
+  }
+  const videoId = readString(value.videoId);
+  const frameId = readNumber(value.frameId);
+  const answer = readString(value.answer);
+  const evidenceFrame = normalizeResult(value.evidenceFrame, 0);
+  if (!videoId || frameId === undefined || !answer || !evidenceFrame) {
+    throw new ApiError("The Q&A API returned an incomplete response.", 502);
+  }
+  const contextFrameIds = Array.isArray(value.contextFrameIds)
+    ? value.contextFrameIds.filter((item): item is number => typeof item === "number" && Number.isFinite(item))
+    : [];
+  return {
+    videoId,
+    frameId,
+    answer,
+    confidence: readNumber(value.confidence) ?? 0,
+    reasoning: readString(value.reasoning),
+    contextFrameIds,
+    evidenceFrame,
+  };
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
@@ -149,6 +176,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       const body: unknown = await response.json();
       if (isRecord(body) && typeof body.message === "string") {
         message = body.message;
+      } else if (isRecord(body) && typeof body.detail === "string") {
+        message = body.detail;
       }
     } catch {
       // Keep the HTTP status message when the backend has no JSON error body.
@@ -170,6 +199,15 @@ export const api = {
       body: JSON.stringify(requestBody),
     });
     return normalizeResponse(raw, requestBody.query);
+  },
+
+  async answerQuestion(requestBody: QaAnswerRequest, signal?: AbortSignal): Promise<QaAnswerResponse> {
+    const raw = await request<unknown>("/qa/answer", {
+      method: "POST",
+      signal,
+      body: JSON.stringify(requestBody),
+    });
+    return normalizeQaResponse(raw);
   },
 
   async getNearbyFrames(

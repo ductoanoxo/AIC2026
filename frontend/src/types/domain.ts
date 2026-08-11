@@ -1,4 +1,9 @@
 export type QueryMode = "kis" | "qa" | "trake";
+export type TranslationProvider =
+  | "gemini"
+  | "deep-translator"
+  | "openrouter"
+  | "openrouter-gemini";
 
 export interface VideoMetadata {
   title?: string;
@@ -37,15 +42,31 @@ export interface SearchRequest {
   query: string;
   topK: number;
   videoId?: string | null;
-  filters?: {
-    objects?: string[];
-  };
+  translator?: TranslationProvider;
 }
 
 export interface SearchResponse {
   query: string;
   total: number;
   results: SearchResult[];
+}
+
+export interface QaAnswerRequest {
+  eventDescription: string;
+  question: string;
+  videoId: string;
+  frameId: number;
+  contextFrames?: 3 | 5 | 7 | 9;
+}
+
+export interface QaAnswerResponse {
+  videoId: string;
+  frameId: number;
+  answer: string;
+  confidence: number;
+  reasoning?: string;
+  contextFrameIds: number[];
+  evidenceFrame: SearchResult;
 }
 
 export interface ApiStatus {

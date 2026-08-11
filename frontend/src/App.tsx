@@ -23,6 +23,7 @@ import type {
   SearchRequest,
   SearchResult,
   TrakeEvent,
+  TranslationProvider,
 } from "./types/domain";
 
 function createTrakeEvent(): TrakeEvent {
@@ -43,16 +44,11 @@ async function copyText(value: string): Promise<boolean> {
   }
 }
 
-function parseObjectFilters(value: string): string[] {
-  return value.split(",").map((label) => label.trim()).filter(Boolean);
-}
-
 export default function App() {
   const [mode, setMode] = useState<QueryMode>("kis");
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(50);
-  const [objectFilterText, setObjectFilterText] = useState("");
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [translator, setTranslator] = useState<TranslationProvider>("gemini");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [resultTotal, setResultTotal] = useState(0);
   const [selectedResult, setSelectedResult] = useState<SearchResult>();
@@ -67,7 +63,12 @@ export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>({ status: "unknown" });
   const [kisCandidates, setKisCandidates] = useState<CandidateEntry[]>([]);
   const [qaCandidates, setQaCandidates] = useState<CandidateEntry[]>([]);
+  const [qaQuestion, setQaQuestion] = useState("");
   const [qaAnswer, setQaAnswer] = useState("");
+  const [qaAnswerLoading, setQaAnswerLoading] = useState(false);
+  const [qaAnswerError, setQaAnswerError] = useState<string>();
+  const [qaConfidence, setQaConfidence] = useState<number>();
+  const [qaReasoning, setQaReasoning] = useState<string>();
   const [trakeEvents, setTrakeEvents] = useState<TrakeEvent[]>([createTrakeEvent()]);
   const [trakeVideoId, setTrakeVideoId] = useState<string>();
   const [trakeAligning, setTrakeAligning] = useState(false);
@@ -76,6 +77,7 @@ export default function App() {
   const searchAbortRef = useRef<AbortController | undefined>(undefined);
   const nearbyAbortRef = useRef<AbortController | undefined>(undefined);
   const trakeAbortRef = useRef<AbortController | undefined>(undefined);
+  const qaAbortRef = useRef<AbortController | undefined>(undefined);
   const searchSequenceRef = useRef(0);
   const toastTimerRef = useRef<number | undefined>(undefined);
 
@@ -96,6 +98,7 @@ export default function App() {
       searchAbortRef.current?.abort();
       nearbyAbortRef.current?.abort();
       trakeAbortRef.current?.abort();
+      qaAbortRef.current?.abort();
       if (toastTimerRef.current !== undefined) window.clearTimeout(toastTimerRef.current);
     };
   }, []);
@@ -120,6 +123,12 @@ export default function App() {
   }, []);
 
   const selectResult = useCallback((result: SearchResult) => {
+    qaAbortRef.current?.abort();
+    setQaAnswerLoading(false);
+    setQaAnswer("");
+    setQaAnswerError(undefined);
+    setQaConfidence(undefined);
+    setQaReasoning(undefined);
     setSelectedResult(result);
     setActiveFrame(result);
     void loadNearbyFrames(result);
@@ -128,7 +137,11 @@ export default function App() {
   const handleSearch = useCallback(async () => {
     const trimmedQuery = query.trim();
     if (!trimmedQuery) {
-      setError("Enter a query before searching.");
+      setError(mode === "qa" ? "Enter an event description before searching." : "Enter a query before searching.");
+      return;
+    }
+    if (mode === "qa" && !qaQuestion.trim()) {
+      setError("Enter the Q&A question before searching.");
       return;
     }
 
@@ -141,7 +154,7 @@ export default function App() {
       query: trimmedQuery,
       topK,
       videoId: null,
-      filters: { objects: parseObjectFilters(objectFilterText) },
+      translator,
     };
     setSearchLoading(true);
     setHasSearched(true);
@@ -164,15 +177,20 @@ export default function App() {
     } finally {
       if (!controller.signal.aborted && sequence === searchSequenceRef.current) setSearchLoading(false);
     }
-  }, [objectFilterText, query, topK]);
+  }, [mode, qaQuestion, query, topK, translator]);
 
   const handleModeChange = (nextMode: QueryMode) => {
+    qaAbortRef.current?.abort();
     setMode(nextMode);
     setError(undefined);
     setResults([]);
     setResultTotal(0);
     setHasSearched(false);
     setQaAnswer("");
+    setQaAnswerLoading(false);
+    setQaAnswerError(undefined);
+    setQaConfidence(undefined);
+    setQaReasoning(undefined);
     setSelectedResult(undefined);
     setActiveFrame(undefined);
     setNearbyFrames([]);
@@ -197,8 +215,18 @@ export default function App() {
     const index = nearbyFrames.findIndex((frame) => frame.frameId === activeFrame.frameId);
     const nextIndex = direction === "previous" ? index - 1 : index + 1;
     const nextFrame = nearbyFrames[nextIndex];
-    if (nextFrame) setActiveFrame(nextFrame);
-  }, [activeFrame, nearbyFrames]);
+    if (nextFrame) {
+      qaAbortRef.current?.abort();
+      setQaAnswerLoading(false);
+      setActiveFrame(nextFrame);
+      if (mode === "qa") {
+        setQaAnswer("");
+        setQaAnswerError(undefined);
+        setQaConfidence(undefined);
+        setQaReasoning(undefined);
+      }
+    }
+  }, [activeFrame, mode, nearbyFrames]);
 
   useEffect(() => {
     const handleArrow = (event: KeyboardEvent) => {
@@ -211,6 +239,52 @@ export default function App() {
   }, [moveNearby]);
 
   const currentFrame = activeFrame;
+
+  const selectNearbyFrame = useCallback((frame: NearbyFrame) => {
+    qaAbortRef.current?.abort();
+    setQaAnswerLoading(false);
+    setActiveFrame(frame);
+    if (mode === "qa") {
+      setQaAnswer("");
+      setQaAnswerError(undefined);
+      setQaConfidence(undefined);
+      setQaReasoning(undefined);
+    }
+  }, [mode]);
+
+  const handleQaAnswer = useCallback(async () => {
+    if (!currentFrame || !query.trim() || !qaQuestion.trim()) return;
+    qaAbortRef.current?.abort();
+    const controller = new AbortController();
+    qaAbortRef.current = controller;
+    setQaAnswerLoading(true);
+    setQaAnswerError(undefined);
+    setQaConfidence(undefined);
+    setQaReasoning(undefined);
+    try {
+      const response = await api.answerQuestion({
+        eventDescription: query.trim(),
+        question: qaQuestion.trim(),
+        videoId: currentFrame.videoId,
+        frameId: currentFrame.frameId,
+        contextFrames: 5,
+      }, controller.signal);
+      if (controller.signal.aborted) return;
+      setQaAnswer(response.answer);
+      setQaConfidence(response.confidence);
+      setQaReasoning(response.reasoning);
+      setActiveFrame(response.evidenceFrame);
+      setNearbyFrames((frames) => frames.some(
+        (frame) => frame.videoId === response.evidenceFrame.videoId && frame.frameId === response.evidenceFrame.frameId,
+      ) ? frames : [...frames, response.evidenceFrame].sort((a, b) => a.frameId - b.frameId));
+      notify(`Answer generated · evidence frame ${response.frameId}`);
+    } catch (requestError) {
+      if (!isAbortError(requestError)) setQaAnswerError(getErrorMessage(requestError));
+    } finally {
+      if (!controller.signal.aborted) setQaAnswerLoading(false);
+    }
+  }, [currentFrame, notify, qaQuestion, query]);
+
   const currentSubmission = useMemo(() => {
     if (mode === "trake") {
       return trakeVideoId ? serializeTrakeSubmission(trakeVideoId, trakeEvents.map((event) => event.selectedFrame)) : null;
@@ -226,7 +300,7 @@ export default function App() {
   const canAdd = canAddCandidate(candidates.length);
 
   const addCandidate = () => {
-    if (!currentFrame || !canAdd) return;
+    if (!currentFrame || !canAdd || (mode === "qa" && !qaAnswer.trim())) return;
     const candidate: CandidateEntry = {
       id: createClientId("candidate"),
       videoId: currentFrame.videoId,
@@ -294,10 +368,9 @@ export default function App() {
     setTrakeAligning(true);
     setTrakeError(undefined);
     setTrakeEvents((events) => events.map((event) => ({ ...event, status: "loading", error: undefined })));
-    const filters = { objects: parseObjectFilters(objectFilterText) };
     const aligned = await Promise.all(trakeEvents.map(async (event) => {
       try {
-        const response = await api.search({ query: event.description.trim(), topK: 30, videoId: trakeVideoId, filters }, controller.signal);
+        const response = await api.search({ query: event.description.trim(), topK: 30, videoId: trakeVideoId, translator }, controller.signal);
         return { id: event.id, frames: response.results, status: "ready" as const };
       } catch (requestError) {
         if (isAbortError(requestError)) return { id: event.id, frames: [], status: "idle" as const };
@@ -350,15 +423,45 @@ export default function App() {
           <SearchToolbar
             mode={mode}
             query={query}
+            qaQuestion={qaQuestion}
             topK={topK}
-            objectFilterText={objectFilterText}
-            filtersOpen={filtersOpen}
+            translator={translator}
             loading={searchLoading}
             onQueryChange={setQuery}
+            onQaQuestionChange={setQaQuestion}
             onTopKChange={setTopK}
-            onObjectFilterTextChange={setObjectFilterText}
-            onFiltersToggle={() => setFiltersOpen((open) => !open)}
+            onTranslatorChange={setTranslator}
             onSearch={() => void handleSearch()}
+            answerSlot={mode === "qa" ? (
+              <div className="toolbar-answer field-block">
+                <label htmlFor="qa-answer">Answer</label>
+                <textarea
+                  id="qa-answer"
+                  value={qaAnswer}
+                  onChange={(event) => setQaAnswer(event.target.value)}
+                  placeholder="Generate an answer or type one in Vietnamese / English"
+                  rows={2}
+                />
+                <div className="qa-answer-actions">
+                  <button
+                    className={`button button-primary ${qaAnswerLoading ? "is-loading" : ""}`}
+                    type="button"
+                    disabled={qaAnswerLoading || !currentFrame || !qaQuestion.trim()}
+                    onClick={() => void handleQaAnswer()}
+                  >
+                    {qaAnswerLoading ? "Analyzing frames" : "Generate answer"}
+                  </button>
+                  {qaConfidence !== undefined ? <span className="qa-confidence">Confidence · {Math.round(qaConfidence * 100)}%</span> : null}
+                </div>
+                <span className="helper-text">
+                  {currentFrame
+                    ? <>Analyzes five frames around <code>{currentFrame.videoId}/{currentFrame.frameId}</code>.</>
+                    : "Select a candidate frame to enable answer generation."}
+                </span>
+                {qaReasoning ? <span className="helper-text">Evidence: {qaReasoning}</span> : null}
+                {qaAnswerError ? <div className="inline-error" role="alert"><span className="error-symbol">!</span><span>{qaAnswerError}</span></div> : null}
+              </div>
+            ) : undefined}
           />
           {error ? <div className="global-error" role="alert"><span className="error-symbol">!</span><span>{error}</span><button type="button" onClick={() => setError(undefined)} aria-label="Dismiss error">×</button></div> : null}
         </section>
@@ -400,18 +503,11 @@ export default function App() {
               nearbyFrames={nearbyFrames}
               nearbyLoading={nearbyLoading}
               nearbyError={nearbyError}
-              onSelectNearby={setActiveFrame}
+              onSelectNearby={selectNearbyFrame}
               onRetryNearby={handleRetryNearby}
             />
           </aside>
         </div>
-
-        {mode === "qa" && currentFrame ? (
-          <section className="answer-panel panel" aria-labelledby="answer-heading">
-            <div><span className="eyebrow">Manual answer</span><h2 id="answer-heading">Q&A response</h2></div>
-            <div className="answer-field field-block"><label htmlFor="qa-answer">Answer</label><textarea id="qa-answer" value={qaAnswer} onChange={(event) => setQaAnswer(event.target.value)} placeholder="Type the answer in Vietnamese or English" rows={2} /><span className="helper-text">Optional backend suggestions can be shown here later; manual editing stays enabled.</span></div>
-          </section>
-        ) : null}
 
         {mode === "trake" ? (
           <TrakeWorkspace
