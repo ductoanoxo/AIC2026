@@ -1,0 +1,8 @@
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+backend/.venv/
+backend/__pycache__/
+.venv/
+*.py[cod]
+coverage/
