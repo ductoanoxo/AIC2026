@@ -1,0 +1,52 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AIC_DATASET_DIR: /data/Feature_Dataset
+      AIC_VIDEO_DIR: /data/Dataset
+      AIC_INDEX_DIR: /data/index
+      AIC_CACHE_DIR: /tmp/aic-cache
+      # An empty prefix makes the runtime accept all AIC batches, not only L30.
+      AIC_BATCH_PREFIX: ""
+      AIC_CORS_ORIGINS: http://localhost:8080
+    ports:
+      - "8000:8000"
+    volumes:
+      # The FAISS index and metadata are produced offline (for example on
+      # Kaggle). The backend only reads these files.
+      - ${AIC_INDEX_HOST_PATH:-./artifacts/faiss}:/data/index:ro
+      - ${AIC_DATASET_HOST_PATH:-./Feature_Dataset}:/data/Feature_Dataset:ro
+      # Required for video playback, thumbnails and remote-VLM Q&A. It can be
+      # omitted for retrieval-only deployments.
+      - ${AIC_VIDEO_HOST_PATH:-./Dataset}:/data/Dataset:ro
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/status', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: /api
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
