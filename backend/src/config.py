@@ -43,6 +43,7 @@ class Settings:
         os.getenv("AIC_VIDEO_DIR", "../Dataset"), BACKEND_DIR
     )
     index_dir: Path = _resolve(os.getenv("AIC_INDEX_DIR", "./storage"), BACKEND_DIR)
+    cache_dir: Path = _resolve(os.getenv("AIC_CACHE_DIR", "./storage"), BACKEND_DIR)
     batch_prefix: str = os.getenv("AIC_BATCH_PREFIX", "L30_")
     # OpenAI's original ViT-B/32 checkpoint uses QuickGELU. This OpenCLIP model
     # name reproduces that architecture and avoids silently mismatched queries.
@@ -118,7 +119,7 @@ class Settings:
 
     @property
     def thumbnail_dir(self) -> Path:
-        return self.index_dir / "thumbnails"
+        return self.cache_dir / "thumbnails"
 
     @property
     def object_catalog_path(self) -> Path:

@@ -1,11 +1,11 @@
 {
     "schema_version": 1,
-    "commit": "",
-    "indexed_at": "2026-08-11T13:57:06Z",
+    "commit": "f149a0c4eb911faae0e60894ceaa6445cea0d9b2",
+    "indexed_at": "2026-08-13T14:05:50Z",
     "project": "home-traductoan-aichelan",
-    "nodes": 1078,
-    "edges": 1181,
-    "original_size": 3014656,
-    "compressed_size": 295295,
+    "nodes": 1293,
+    "edges": 1734,
+    "original_size": 4063232,
+    "compressed_size": 523145,
     "compression_level": 3
 }

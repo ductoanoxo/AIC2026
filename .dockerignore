@@ -1,0 +1,27 @@
+.git
+.gitignore
+.codegraph
+.codebase-memory
+.agents
+.codex
+
+.env
+.env.*
+!.env.example
+
+node_modules
+frontend/node_modules
+frontend/dist
+backend/storage
+artifacts
+storage
+__pycache__
+*.py[cod]
+*.log
+
+# Large local datasets, generated artifacts and notebooks stay outside images.
+Dataset
+Feature_Dataset
+Code
+image
+*.ipynb
