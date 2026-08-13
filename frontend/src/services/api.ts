@@ -120,11 +120,18 @@ function normalizeResponse(value: unknown, fallbackQuery: string): SearchRespons
     const normalized = normalizeResult(item, index);
     return normalized ? [normalized] : [];
   });
-  return {
+  const response: SearchResponse = {
     query: readString(payload.query) ?? fallbackQuery,
     total: readNumber(payload.total) ?? results.length,
     results,
   };
+  const inferredObjects = Array.isArray(payload.inferredObjects)
+    ? payload.inferredObjects.filter((item): item is string => typeof item === "string")
+    : [];
+  if (inferredObjects.length > 0) response.inferredObjects = inferredObjects;
+  const objectInferenceModel = readString(payload.objectInferenceModel);
+  if (objectInferenceModel) response.objectInferenceModel = objectInferenceModel;
+  return response;
 }
 
 function normalizeQaResponse(value: unknown): QaAnswerResponse {

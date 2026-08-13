@@ -7,6 +7,8 @@ interface SearchToolbarProps {
   qaQuestion: string;
   topK: number;
   translator: TranslationProvider;
+  objectFilter: string;
+  inferredObjects: string[];
   loading: boolean;
   /** Rendered above the translator/top-k row; App owns the Q&A answer state. */
   answerSlot?: ReactNode;
@@ -14,6 +16,7 @@ interface SearchToolbarProps {
   onQaQuestionChange: (question: string) => void;
   onTopKChange: (topK: number) => void;
   onTranslatorChange: (translator: TranslationProvider) => void;
+  onObjectFilterChange: (objects: string) => void;
   onSearch: () => void;
 }
 
@@ -23,12 +26,15 @@ export function SearchToolbar({
   qaQuestion,
   topK,
   translator,
+  objectFilter,
+  inferredObjects,
   loading,
   answerSlot,
   onQueryChange,
   onQaQuestionChange,
   onTopKChange,
   onTranslatorChange,
+  onObjectFilterChange,
   onSearch,
 }: SearchToolbarProps) {
   const queryLabel = mode === "qa" ? "Event description" : mode === "trake" ? "Overall video description" : "Query";
@@ -87,6 +93,20 @@ export function SearchToolbar({
       <div className="toolbar-side">
         {answerSlot}
         <div className="toolbar-actions">
+          <div className="field-block object-filter-field">
+            <label htmlFor="object-filter">Objects <span className="auto-label">AI auto</span></label>
+            <input
+              id="object-filter"
+              value={objectFilter || inferredObjects.join(", ")}
+              onChange={(event) => onObjectFilterChange(event.target.value)}
+              placeholder="Auto from query · optional override"
+              aria-describedby="object-filter-help"
+            />
+            <span className="visually-hidden" id="object-filter-help">Comma-separated object names; all must match.</span>
+            {inferredObjects.length > 0 && !objectFilter.trim() ? (
+              <span className="inferred-objects">Auto-filled by DeepSeek</span>
+            ) : null}
+          </div>
           <div className="field-block translator-field">
             <label htmlFor="translator">Translator</label>
             <select

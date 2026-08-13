@@ -39,6 +39,9 @@ class Settings:
     dataset_dir: Path = _resolve(
         os.getenv("AIC_DATASET_DIR", "../Feature_Dataset"), BACKEND_DIR
     )
+    source_video_dir: Path = _resolve(
+        os.getenv("AIC_VIDEO_DIR", "../Dataset"), BACKEND_DIR
+    )
     index_dir: Path = _resolve(os.getenv("AIC_INDEX_DIR", "./storage"), BACKEND_DIR)
     batch_prefix: str = os.getenv("AIC_BATCH_PREFIX", "L30_")
     # OpenAI's original ViT-B/32 checkpoint uses QuickGELU. This OpenCLIP model
@@ -52,6 +55,9 @@ class Settings:
     )
     openrouter_translation_model: str = os.getenv(
         "AIC_OPENROUTER_MODEL", "deepseek/deepseek-v4-flash-0731"
+    )
+    object_inference_model: str = os.getenv(
+        "AIC_OBJECT_MODEL", "deepseek/deepseek-v4-flash-0731"
     )
     openrouter_gemini_model: str = os.getenv(
         "AIC_OPENROUTER_GEMINI_MODEL", "google/gemini-3-flash-preview"
@@ -84,8 +90,23 @@ class Settings:
         return self.dataset_dir / "media-info-aic25-b1" / "media-info"
 
     @property
+    def object_dir(self) -> Path:
+        return self.dataset_dir / "objects-aic25-b1" / "objects"
+
+    @property
     def video_dir(self) -> Path:
-        return self.dataset_dir / "Videos_L30_a" / "video"
+        return self.source_video_dir
+
+    def find_video(self, video_id: str) -> Path | None:
+        """Find a source video anywhere below the configured video root."""
+        direct = self.video_dir / f"{video_id}.mp4"
+        if direct.is_file():
+            return direct
+        matches = list(self.video_dir.rglob(f"{video_id}.mp4"))
+        if len(matches) > 1:
+            locations = ", ".join(str(path) for path in matches)
+            raise RuntimeError(f"Duplicate source video {video_id}: {locations}")
+        return matches[0] if matches else None
 
     @property
     def faiss_path(self) -> Path:
@@ -98,6 +119,10 @@ class Settings:
     @property
     def thumbnail_dir(self) -> Path:
         return self.index_dir / "thumbnails"
+
+    @property
+    def object_catalog_path(self) -> Path:
+        return self.index_dir / "object_classes.json"
 
     @property
     def gemini_api_key(self) -> str:

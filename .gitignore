@@ -9,6 +9,8 @@ coverage/
 
 # Local datasets and secrets
 /Feature_Dataset/
+/Feature_Dataset.zip
+/Dataset/
 /.env
 # Backend generated/runtime files
 backend/.venv/

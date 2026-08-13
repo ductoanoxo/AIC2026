@@ -43,12 +43,17 @@ export interface SearchRequest {
   topK: number;
   videoId?: string | null;
   translator?: TranslationProvider;
+  filters?: {
+    objects?: string[];
+  };
 }
 
 export interface SearchResponse {
   query: string;
   total: number;
   results: SearchResult[];
+  inferredObjects?: string[];
+  objectInferenceModel?: string;
 }
 
 export interface QaAnswerRequest {

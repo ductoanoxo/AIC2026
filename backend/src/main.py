@@ -15,6 +15,8 @@ from .schemas import QaAnswerRequest, SearchRequest
 from .query_translation import TranslationError, translate_queries_for_clip
 from .qa import QaError, answer_video_question
 from .search import search_service
+from .object_inference import infer_query_objects
+from .objects import object_match_score, object_relevance_score, read_object_catalog, read_objects
 
 
 @asynccontextmanager
@@ -40,8 +42,11 @@ def public_url(request: Request, path: str) -> str:
 def video_path(video_id: str) -> Path:
     if not video_id.startswith(settings.batch_prefix) or not video_id.replace("_", "").isalnum():
         raise HTTPException(status_code=404, detail="Video not found")
-    path = settings.video_dir / f"{video_id}.mp4"
-    if not path.is_file():
+    try:
+        path = settings.find_video(video_id)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if path is None:
         raise HTTPException(status_code=404, detail="Video not found")
     return path
 
@@ -73,6 +78,7 @@ def result_payload(request: Request, item: dict[str, Any], rank: int) -> dict[st
     video_id = item["videoId"]
     frame_id = int(item["frameId"])
     score = item.get("score")
+    detections = read_objects(video_id, int(item["keyframeIndex"]))
     return {
         "rank": rank,
         "videoId": video_id,
@@ -80,12 +86,12 @@ def result_payload(request: Request, item: dict[str, Any], rank: int) -> dict[st
         "keyframeIndex": int(item["keyframeIndex"]),
         "timestamp": float(item["timestamp"]),
         "score": score,
-        "clipScore": score,
-        "objectScore": 0.0,
+        "clipScore": float(item.get("clipScore", score)) if score is not None else None,
+        "objectScore": float(item.get("objectScore", 0.0)),
         "thumbnailUrl": public_url(request, f"/frames/{video_id}/{frame_id}"),
         "videoUrl": public_url(request, f"/videos/{video_id}"),
         "metadata": read_video_metadata(video_id, float(item["fps"])),
-        "objects": [],
+        "objects": list(detections),
     }
 
 
@@ -96,6 +102,7 @@ def status() -> dict[str, Any]:
         "version": app.version,
         "message": None if search_service.ready else "Run python -m src.build_index first",
         "vectors": len(search_service.items),
+        "objectClasses": len(read_object_catalog()),
     }
 
 
@@ -103,7 +110,51 @@ def status() -> dict[str, Any]:
 def search(body: SearchRequest, request: Request) -> dict[str, Any]:
     try:
         english_queries = translate_queries_for_clip(body.query, body.translator)
-        matches = search_service.search_many(english_queries, body.topK, body.videoId)
+        wanted_objects = body.filters.objects
+        candidate_count = min(len(search_service.items), max(body.topK, body.topK * 5))
+        matches = search_service.search_many(english_queries, candidate_count, body.videoId)
+        candidate_detections = {
+            (item["videoId"], int(item["keyframeIndex"])): read_objects(
+                item["videoId"], int(item["keyframeIndex"])
+            )
+            for item in matches
+        }
+        inferred_objects: list[str] = []
+        if not wanted_objects:
+            inferred_objects = list(infer_query_objects(body.query, read_object_catalog()))
+        if wanted_objects:
+            reranked = []
+            for item in matches:
+                detections = candidate_detections[(item["videoId"], int(item["keyframeIndex"]))]
+                object_score = object_match_score(detections, wanted_objects)
+                if object_score <= 0:
+                    continue
+                clip_score = float(item["score"])
+                reranked.append({
+                    **item,
+                    "clipScore": clip_score,
+                    "objectScore": object_score,
+                    "score": 0.85 * clip_score + 0.15 * object_score,
+                })
+            reranked.sort(key=lambda item: item["score"], reverse=True)
+            matches = reranked
+        elif inferred_objects:
+            # Use detections only as a conservative tie-breaker. Their scores
+            # are not calibrated to CLIP, so cap the total boost at 0.003.
+            reranked = []
+            for item in matches:
+                detections = candidate_detections[(item["videoId"], int(item["keyframeIndex"]))]
+                object_score = object_relevance_score(detections, inferred_objects)
+                clip_score = float(item["score"])
+                reranked.append({
+                    **item,
+                    "clipScore": clip_score,
+                    "objectScore": object_score,
+                    "score": clip_score + 0.003 * object_score,
+                })
+            reranked.sort(key=lambda item: item["score"], reverse=True)
+            matches = reranked
+        matches = matches[:body.topK]
     except TranslationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except RuntimeError as error:
@@ -115,6 +166,8 @@ def search(body: SearchRequest, request: Request) -> dict[str, Any]:
         "translatedQuery": english_queries[0],
         "expandedQueries": list(english_queries),
         "translator": body.translator,
+        "inferredObjects": inferred_objects,
+        "objectInferenceModel": settings.object_inference_model if inferred_objects else None,
         "message": f"Đã tìm thấy {len(results)} kết quả phù hợp.",
         "total": len(results),
         "results": results,

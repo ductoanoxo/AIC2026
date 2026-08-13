@@ -39,11 +39,13 @@ def build_index(batch_prefix: str = settings.batch_prefix) -> tuple[int, int]:
     for feature_path in feature_paths:
         video_id = feature_path.stem
         mapping_path = settings.mapping_dir / f"{video_id}.csv"
-        video_path = settings.video_dir / f"{video_id}.mp4"
+        video_path = settings.find_video(video_id)
         if not mapping_path.is_file():
             raise FileNotFoundError(f"Missing keyframe mapping: {mapping_path}")
-        if not video_path.is_file():
-            raise FileNotFoundError(f"Missing source video: {video_path}")
+        if video_path is None:
+            raise FileNotFoundError(
+                f"Missing source video {video_id}.mp4 below {settings.video_dir}"
+            )
 
         matrix = np.load(feature_path, allow_pickle=False)
         if matrix.ndim != 2:
@@ -94,4 +96,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

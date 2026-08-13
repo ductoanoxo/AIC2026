@@ -49,6 +49,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(50);
   const [translator, setTranslator] = useState<TranslationProvider>("gemini");
+  const [objectFilter, setObjectFilter] = useState("");
+  const [inferredObjects, setInferredObjects] = useState<string[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [resultTotal, setResultTotal] = useState(0);
   const [selectedResult, setSelectedResult] = useState<SearchResult>();
@@ -155,6 +157,9 @@ export default function App() {
       topK,
       videoId: null,
       translator,
+      filters: {
+        objects: objectFilter.split(",").map((item) => item.trim()).filter(Boolean),
+      },
     };
     setSearchLoading(true);
     setHasSearched(true);
@@ -164,6 +169,7 @@ export default function App() {
       if (sequence !== searchSequenceRef.current) return;
       setResults(response.results);
       setResultTotal(response.total);
+      setInferredObjects(response.inferredObjects ?? []);
       setSelectedResult(undefined);
       setActiveFrame(undefined);
       setNearbyFrames([]);
@@ -172,12 +178,13 @@ export default function App() {
       if (!isAbortError(requestError) && sequence === searchSequenceRef.current) {
         setResults([]);
         setResultTotal(0);
+        setInferredObjects([]);
         setError(getErrorMessage(requestError));
       }
     } finally {
       if (!controller.signal.aborted && sequence === searchSequenceRef.current) setSearchLoading(false);
     }
-  }, [mode, qaQuestion, query, topK, translator]);
+  }, [mode, objectFilter, qaQuestion, query, topK, translator]);
 
   const handleModeChange = (nextMode: QueryMode) => {
     qaAbortRef.current?.abort();
@@ -185,6 +192,7 @@ export default function App() {
     setError(undefined);
     setResults([]);
     setResultTotal(0);
+    setInferredObjects([]);
     setHasSearched(false);
     setQaAnswer("");
     setQaAnswerLoading(false);
@@ -426,11 +434,17 @@ export default function App() {
             qaQuestion={qaQuestion}
             topK={topK}
             translator={translator}
+            objectFilter={objectFilter}
+            inferredObjects={inferredObjects}
             loading={searchLoading}
-            onQueryChange={setQuery}
+            onQueryChange={(value) => {
+              setQuery(value);
+              setInferredObjects([]);
+            }}
             onQaQuestionChange={setQaQuestion}
             onTopKChange={setTopK}
             onTranslatorChange={setTranslator}
+            onObjectFilterChange={setObjectFilter}
             onSearch={() => void handleSearch()}
             answerSlot={mode === "qa" ? (
               <div className="toolbar-answer field-block">
